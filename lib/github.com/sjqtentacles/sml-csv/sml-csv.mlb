@@ -1,0 +1,5 @@
+(* MLton basis file for the sml-csv library.
+ * Brings `structure Csv` (matching CSV) into scope. *)
+$(SML_LIB)/basis/basis.mlb
+
+sources.mlb
