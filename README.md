@@ -96,6 +96,30 @@ val tsv = Csv.parseRows #"\t" "a\tb\nc\td"   (* [["a","b"],["c","d"]] *)
 - **Errors.** An unterminated quoted field (or text after a closing quote)
   raises `Csv`.
 
+## Example
+
+`make example` builds and runs [`examples/demo.sml`](examples/demo.sml), which
+parses a header plus quoted fields (an embedded comma and doubled quotes),
+reads it back with `parseNamed`, and round-trips it through `writeWith` with
+both CRLF and LF line endings (output is byte-identical under MLton and
+Poly/ML):
+
+```
+Parsed CSV (header + quoted field with embedded comma):
+  header: name | city | note
+  row:    Alice | Springfield, IL | plain
+  row:    Bob | Chicago | he said "hi"
+
+Named rows (parseNamed):
+  name=Alice, city=Springfield, IL, note=plain
+  name=Bob, city=Chicago, note=he said "hi"
+
+Round trip via writeWith (CRLF vs LF):
+  CRLF length = 75
+  LF length   = 73
+  parseRows (writeWith LF) = original rows: true
+```
+
 ## License
 
 MIT. See [LICENSE](LICENSE).
