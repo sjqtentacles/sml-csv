@@ -121,6 +121,90 @@ struct
                  ("a\tb", Csv.write { delim = tab } [["a", "b"]])
       val () = checkBool "tsv round-trip"
                  (true, Csv.parseRows tab (Csv.write { delim = tab } [["a,comma", "b"]]) = [["a,comma", "b"]])
+
+      val () = section "sml-check properties"
+
+      (* Field-character generator weighted toward plain printable ASCII but
+         also regularly emitting the delimiter, the quote character, CR and
+         LF, so the quoting/escaping path is exercised, not just the plain
+         one. `write` is documented to quote any field containing `delim`, a
+         double-quote, CR, or LF and to double embedded quotes, so this
+         should round-trip regardless of which of these a field contains. *)
+      val genFieldChar =
+        Check.frequency
+          [ (80, Check.charRange (#" ", #"~"))
+          , (5, Check.pure #",")
+          , (5, Check.pure (Char.chr 34))   (* '"' *)
+          , (5, Check.pure (Char.chr 13))   (* CR *)
+          , (5, Check.pure (Char.chr 10))   (* LF *)
+          ]
+      val genField = Check.stringOf genFieldChar
+      (* Rows have at least one field: `write` of a zero-field row produces
+         "", and a blank input line parses back to a single empty-string
+         field (see csv.sig), so a truly empty row can never round-trip. *)
+      val genRow = Check.nonEmptyListOf genField
+      (* A trailing row that is exactly one empty field contributes nothing
+         but a bare record separator to `write`'s output, so it is
+         textually indistinguishable from "no trailing record" and gets
+         swallowed by the "a single trailing record separator does NOT
+         produce a spurious empty final record" rule on reparse (csv.sig).
+         `parse (write rows) = rows` therefore cannot hold whenever the last
+         row is [""]; exclude that one degenerate shape. *)
+      fun lastRowIsBlank rows =
+        case List.rev rows of
+            (r :: _) => r = [""]
+          | [] => false
+      val genRows = Check.filter (fn rows => not (lastRowIsBlank rows)) (Check.listOf genRow)
+
+      fun showRows rs =
+        "[" ^ String.concatWith ";"
+                (List.map (fn r => "[" ^ String.concatWith ","
+                                            (List.map (fn f => "\"" ^ f ^ "\"") r) ^ "]") rs)
+              ^ "]"
+
+      (* prop: parse (write rows) = rows for the comma delimiter, over
+         arbitrary generated fields (including embedded delimiters, quotes,
+         CR and LF). *)
+      val () =
+        Harness.check "prop: parseC (Csv.write rows) = rows (comma)"
+          (case Check.quickCheck
+                  (Check.forAll genRows showRows
+                     (fn rows => parseC (Csv.write { delim = comma } rows) = rows)) of
+               Check.Passed _ => true
+             | Check.Failed _ => false)
+
+      (* prop: the same round-trip holds for an arbitrary delimiter (TSV
+         here), showing the quoting logic isn't hard-coded to comma. *)
+      val () =
+        Harness.check "prop: parseRows tab (Csv.write rows) = rows (tab)"
+          (case Check.quickCheck
+                  (Check.forAll genRows showRows
+                     (fn rows => Csv.parseRows tab (Csv.write { delim = tab } rows) = rows)) of
+               Check.Passed _ => true
+             | Check.Failed _ => false)
+
+      (* prop: writeWith with an LF record separator round-trips exactly like
+         the CRLF default. *)
+      val () =
+        Harness.check "prop: parseC (Csv.writeWith {..LF} rows) = rows"
+          (case Check.quickCheck
+                  (Check.forAll genRows showRows
+                     (fn rows =>
+                        parseC (Csv.writeWith { delim = comma, newline = Csv.LF } rows) = rows)) of
+               Check.Passed _ => true
+             | Check.Failed _ => false)
+
+      (* prop: a field forced to contain the delimiter, a quote, CR and LF
+         all at once still round-trips correctly when embedded next to a
+         plain neighbor field. *)
+      val genNastyField = Check.map (fn s => ",\"\r\n" ^ s) genField
+      val () =
+        Harness.check "prop: field with delim+quote+CR+LF round-trips"
+          (case Check.quickCheck
+                  (Check.forAll genNastyField (fn s => "\"" ^ s ^ "\"")
+                     (fn s => parseC (Csv.write { delim = comma } [[s, "x"]]) = [[s, "x"]])) of
+               Check.Passed _ => true
+             | Check.Failed _ => false)
     in
       ()
     end
